@@ -102,6 +102,8 @@ closing_last_editor_in_pane_should_close_pane:      true
 closing_last_editor_should_exit_program:            false
 
 line_endings:                                       preserve  # options: lf, crlf, preserve
+vim_mode:                                           true
+autocomplete_on_tab:                                true
 
 # NOTE: some settings can be specified for a subset of files, based on their language or a wildcard,
 # for example:

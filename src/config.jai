@@ -4,7 +4,7 @@
 
 // Increment this if your PR adds a setting, color or default keybinding (and amend the relevant array
 // in config_migrator.jai).  You don't need to increase it for each such change; once per PR is best.
-CURRENT_CONFIG_VERSION :: 26;
+CURRENT_CONFIG_VERSION :: 27;
 
 get_global_config_path :: inline () -> string /* temp */ {
     return tprint("%/global.focus-config", config_dir);
@@ -996,6 +996,8 @@ Settings :: struct {
     closing_last_editor_should_exit_program                 := false;   @v23
     show_pane_numbers                                       := false;   @v23
     show_tab_characters_in_selection                        := true;    @v24
+    vim_mode                                                := true;    @v27
+    autocomplete_on_tab                                     := true;    @v27
 
     // TODO
     // load_last_session_on_start:         true

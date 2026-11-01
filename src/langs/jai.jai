@@ -177,6 +177,18 @@ tokenize_jai_for_indentation :: (buffer: *Buffer) -> [] Indentation_Token /* tem
     return tokens;
 }
 
+jai_completion_keywords :: () -> [3] [] string {
+    lists: [3] [] string;
+    lists[0] = KEYWORDS;
+    lists[1] = TYPE_KEYWORDS;
+    lists[2] = VALUE_KEYWORDS;
+    return lists;
+}
+
+jai_completion_directives :: () -> [] string {
+    return DIRECTIVES;
+}
+
 #scope_file
 
 // We're using a separate tokenizer here because we have to keep track of last 2 tokens in many places
@@ -205,6 +217,7 @@ set_token_len :: (using tokenizer: *Jai_Tokenizer, token: *Token) #expand {
 highlight :: (tokenizer: *Jai_Tokenizer, token: *Token, buffer: *Buffer) #expand {
     tokenizer.last_token = token.*;
     memset(buffer.tokens.data + token.start, xx token.type, token.len);
+    if tokenizer.type_context != .NONE || tokenizer.for_header || (token.type == .operation && token.operation == .greater_than) then update_type_context(tokenizer, token.*);
 }
 
 start_new_token :: inline (using tokenizer: *Jai_Tokenizer) -> Token {
@@ -282,13 +295,22 @@ parse_identifier_or_keyword :: (using tokenizer: *Jai_Tokenizer, token: *Token, 
 
 parse_identifier_keyword_or_function :: (using tokenizer: *Jai_Tokenizer, token: *Token, buffer: *Buffer) {
     parse_identifier_or_keyword(tokenizer, token, buffer);
-    defer highlight(tokenizer, token, buffer);
+    defer memset(buffer.tokens.data + token.start, xx token.type, token.len);
 
-    if token.type != .identifier return;
+    if token.type != .identifier {
+        if token.type == .keyword && token.keyword == .kw_for then for_header = true;
+        last_token = token.*;
+        return;
+    }
 
-    // Maybe it's a function call or a function definition
+    in_type_position := type_context != .NONE && type_context_depth == 0;
+
     next_token := start_new_token(tokenizer);
-    if t >= max_t return;
+    at_end := t >= max_t;
+
+    if in_type_position && (at_end || t.* != #char ":") then token.type = .type;
+    last_token = token.*;
+    if at_end return;
 
     char := t.*;
 
@@ -297,7 +319,8 @@ parse_identifier_keyword_or_function :: (using tokenizer: *Jai_Tokenizer, token:
     if char == #char "(" {
         t += 1;
         next_token.type = .punctuation;
-        token.type = .function;
+        next_token.punctuation = .l_paren;
+        if token.type != .type then token.type = .function;
 
         set_token_len(tokenizer, *next_token);
         highlight(tokenizer, *next_token, buffer);
@@ -315,9 +338,16 @@ parse_identifier_keyword_or_function :: (using tokenizer: *Jai_Tokenizer, token:
         parse_colon(tokenizer, *next_token);
 
         set_token_len(tokenizer, *next_token);
+        is_for_binding := for_header;
         highlight(tokenizer, *next_token, buffer);
 
-        if next_token.operation != .double_colon return;  // not a function
+        if next_token.operation != .double_colon {
+            if !is_for_binding {
+                type_context = .DECLARATION;
+                type_context_depth = 0;
+            }
+            return;
+        }
 
         next_token = start_new_token(tokenizer);
         if t >= max_t return;
@@ -325,9 +355,11 @@ parse_identifier_keyword_or_function :: (using tokenizer: *Jai_Tokenizer, token:
         char = t.*;
 
         if char == #char "(" {
+            if parens_open_a_procedure(tokenizer) then token.type = .function;
+
             t += 1;
             next_token.type = .punctuation;
-            token.type = .function;
+            next_token.punctuation = .l_paren;
 
             set_token_len(tokenizer, *next_token);
             highlight(tokenizer, *next_token, buffer);
@@ -335,16 +367,105 @@ parse_identifier_keyword_or_function :: (using tokenizer: *Jai_Tokenizer, token:
             t += 1;
             parse_directive(tokenizer, *next_token, buffer);
             highlight(tokenizer, *next_token, buffer);
-            if next_token.type == .directive && (next_token.directive == .directive_bake_arguments || next_token.directive == .directive_bake_constants) {
-                token.type = .function;
+            if next_token.type == .directive {
+                if next_token.directive == .directive_bake_arguments || next_token.directive == .directive_bake_constants {
+                    token.type = .function;
+                } else if next_token.directive == .directive_type {
+                    token.type = .type;
+                }
             }
         } else if ascii_is_alpha(char) {
             parse_identifier_or_keyword(tokenizer, *next_token, buffer);
+            if next_token.type == .identifier {
+                eat_white_space(tokenizer);
+                if t < max_t && t.* == #char "(" then next_token.type = .function;
+            }
             highlight(tokenizer, *next_token, buffer);
-            if next_token.type == .keyword && (next_token.keyword == .kw_inline || next_token.keyword == .kw_no_inline) {
-                token.type = .function;
+            if next_token.type == .keyword {
+                if next_token.keyword == .kw_inline || next_token.keyword == .kw_no_inline {
+                    token.type = .function;
+                } else if next_token.keyword == .kw_struct || next_token.keyword == .kw_enum || next_token.keyword == .kw_enum_flags || next_token.keyword == .kw_union {
+                    token.type = .type;
+                }
             }
         }
+    }
+}
+parens_open_a_procedure :: (using tokenizer: *Jai_Tokenizer) -> bool {
+    MAX_LOOKAHEAD :: 4096;
+
+    end := min(max_t, t + MAX_LOOKAHEAD);
+    cursor := t;
+    depth := 0;
+    in_string := false;
+
+    while cursor < end {
+        c := cursor.*;
+        if in_string {
+            if c == #char "\\" then cursor += 1;
+            else if c == #char "\"" then in_string = false;
+        } else if c == #char "\"" {
+            in_string = true;
+        } else if c == #char "/" && cursor + 1 < end && ((cursor + 1).* == #char "/" || (cursor + 1).* == #char "*") {
+            return true;
+        } else if c == #char "(" {
+            depth += 1;
+        } else if c == #char ")" {
+            depth -= 1;
+            if depth == 0 break;
+        }
+        cursor += 1;
+    }
+    if cursor >= end return true;
+
+    cursor += 1;
+    while cursor < end && (cursor.* == #char " " || cursor.* == #char "\t" || cursor.* == #char "\n") cursor += 1;
+    if cursor >= end return true;
+
+    c := cursor.*;
+    if c == #char "{" || c == #char "#" return true;
+    if cursor + 1 < end && (cursor + 1).* == #char ">" && (c == #char "-" || c == #char "=") return true;
+    return false;
+}
+
+update_type_context :: (using tokenizer: *Jai_Tokenizer, token: Token) {
+    if token.type == .directive && type_context == .RETURN then type_context = .NONE;
+
+    if token.type == .operation {
+        if token.operation == {
+            case .equal;
+                if type_context_depth == 0 then type_context = .NONE;
+            case .colon; #through;
+            case .double_colon;
+                type_context = .NONE;
+                for_header = false;
+            case .greater_than;
+                if t - 2 >= buf.data && (t - 2).* == #char "-" {
+                    type_context = .RETURN;
+                    type_context_depth = 0;
+                }
+        }
+        return;
+    }
+
+    if token.type != .punctuation return;
+
+    if token.punctuation == {
+        case .l_paren; #through;
+        case .l_bracket;
+            if type_context != .NONE then type_context_depth += 1;
+        case .r_paren; #through;
+        case .r_bracket;
+            if type_context_depth > 0 then type_context_depth -= 1;
+            else type_context = .NONE;
+        case .comma;
+            if type_context == .DECLARATION && type_context_depth == 0 then type_context = .NONE;
+        case .semicolon; #through;
+        case .l_brace; #through;
+        case .r_brace;
+            type_context = .NONE;
+            type_context_depth = 0;
+            for_header = false;
     }
 }
 
@@ -552,6 +673,7 @@ parse_period_or_enum_variant :: (using tokenizer: *Jai_Tokenizer, token: *Token)
 
     // Maybe it's an enum variant
     is_enum_variant := !(  last_token.type == .identifier
+                        || last_token.type == .type
                         || last_token.type == .string_literal
                         || last_token.type == .multiline_string
                         || (   last_token.type == .punctuation
@@ -698,6 +820,10 @@ Jai_Tokenizer :: struct {
     current_scope_id := -1;
 
     last_token: Token;
+
+    type_context: enum u8 { NONE; DECLARATION; RETURN; };
+    type_context_depth: s32;
+    for_header: bool;
 
     scratch_buffer: [MAX_IDENTIFIER_LENGTH] u8;
 }

@@ -3,6 +3,7 @@ tokenize_cpp :: (using buffer: *Buffer, start_offset := -1, count := -1) -> [] B
 
     // Allocate temporary space for tracking one previous token
     tokenizer.prev_tokens[0] = New(Token,, temp);
+    enum_highlight: C_Family_Enum_Highlight;
 
     while true {
         token := get_next_token(*tokenizer);
@@ -19,6 +20,8 @@ tokenize_cpp :: (using buffer: *Buffer, start_offset := -1, count := -1) -> [] B
                 memset(tokens.data + prev_token.start, xx Token_Type.function, prev_token.len);
             }
         }
+
+        c_family_mark_enum_value(buffer, *enum_highlight, *token.base, *prev_token.base);
 
         prev_token.* = token;
 

@@ -321,6 +321,11 @@ is_whitespace_char :: inline (ch: u32) -> bool {
     return is_unicode_space(ch) || is_unicode_linebreak(ch);
 }
 
+is_all_digits :: (text: string) -> bool {
+    for cast([] u8) text  if !ascii_is_digit(it) return false;
+    return true;
+}
+
 is_lower :: inline (char: u8) -> bool {
     return char >= #char "a" && char <= #char "z";
 }

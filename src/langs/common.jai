@@ -397,3 +397,77 @@ Token_Type :: enum u8 {
     addition;
     deletion;
 }
+
+C_Family_Enum_Highlight :: struct {
+    after_enum_keyword: bool;
+    expect_value_name: bool;
+    after_scope: bool;
+    body_depth: s32;
+    colon_end: s32 = -1;
+}
+c_family_mark_enum_value :: (buffer: *Buffer, using state: *C_Family_Enum_Highlight, token: *Base_Token, prev_token: *Base_Token) {
+    text := cast(string) to_view(buffer.bytes, token.start, token.len);
+
+    if token.type == .identifier {
+        is_enum_value := is_all_caps_identifier(text) || (after_scope && is_upper(text[0]));
+        if body_depth == 1 && expect_value_name {
+            is_enum_value = true;
+            expect_value_name = false;
+        }
+        if is_enum_value then token.type = .enum_variant;
+        after_scope = false;
+        return;
+    }
+
+    if text == "enum" {
+        after_enum_keyword = true;
+        return;
+    }
+
+    is_symbol := (token.type == .punctuation || token.type == .operation) && token.len == 1;
+    after_scope = is_symbol && text[0] == #char ":" && colon_end == token.start;
+    if !is_symbol return;
+
+    if text[0] == {
+        case #char ":";
+            colon_end = token.start + 1;
+            starts_scope := colon_end < buffer.bytes.count && buffer.bytes[colon_end] == #char ":";
+            if starts_scope && prev_token.type == .enum_variant then memset(buffer.tokens.data + prev_token.start, xx Token_Type.identifier, prev_token.len);
+        case #char "(";
+            if prev_token.type == .enum_variant then memset(buffer.tokens.data + prev_token.start, xx Token_Type.function, prev_token.len);
+            after_enum_keyword = false;
+            if body_depth then body_depth += 1;
+        case #char "[";
+            if body_depth then body_depth += 1;
+        case #char "{";
+            if after_enum_keyword {
+                after_enum_keyword = false;
+                body_depth = 1;
+                expect_value_name = true;
+            } else if body_depth {
+                body_depth += 1;
+            }
+        case #char ")"; #through;
+        case #char "]"; #through;
+        case #char "}";
+            after_enum_keyword = false;
+            if body_depth then body_depth -= 1;
+        case #char ",";
+            after_enum_keyword = false;
+            if body_depth == 1 then expect_value_name = true;
+        case #char ";"; #through;
+        case #char "=";
+            after_enum_keyword = false;
+    }
+}
+
+is_all_caps_identifier :: (text: string) -> bool {
+    if text.count < 2 return false;
+
+    found_letter := false;
+    for byte : cast([] u8) text {
+        if is_lower(byte) || byte >= 0x80 return false;
+        if is_upper(byte) then found_letter = true;
+    }
+    return found_letter;
+}

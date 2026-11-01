@@ -247,6 +247,7 @@ show_build_panel :: () {
         case .switch_to_project_dialog;         #through;
         case .theme_dialog;                     #through;
         case .language_dialog;                  #through;
+        case .vim_command_line;                 #through;
         case .commands_dialog;                  active_global_widget = .editors;  // NOTE: build panel will be shown but not focused
     }
     build_panel_is_shown = true;

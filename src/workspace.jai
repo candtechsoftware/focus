@@ -31,7 +31,7 @@ init_workspace :: () {
     }
 
     // Change working directory to the first directory in the list
-    working_dir := get_working_directory_from_workspace(context.config.workspace.members);
+    working_dir := ifx project_dirs then project_dirs[0].path else get_working_directory_from_workspace(context.config.workspace.members);
     if working_dir {
         set_working_directory(working_dir);
     } else {
@@ -224,6 +224,8 @@ reload_workspace :: (automatic := false) {
     abort_workspace_scanning_and_shut_down_threads();
 
     // Deinit things
+    completion_close();
+    vim_forget_new_files();
     deinit_finder();
     hide_build_panel();
     deinit_build_system();

@@ -1,4 +1,4 @@
-draw_frame :: () {
+draw_frame :: (present := true) {
     #if OS == .WINDOWS {
         /*
          * On Windows, drawing to an OpenGL window while the window is minimized seems to be causing
@@ -62,6 +62,7 @@ draw_frame :: () {
         case .theme_dialog;                     draw_theme_dialog();
         case .language_dialog;                  draw_language_dialog();
         case .kill_running_command_dialog;      draw_kill_running_command_dialog();
+        case .vim_command_line;                 draw_vim_command_line(active_editor_rect);
     }
 
     draw_user_messages(screen);
@@ -76,7 +77,7 @@ draw_frame :: () {
     ui.hot_last_frame    = ui.hot;
     ui.active_last_frame = ui.active;
 
-    Simp.swap_buffers(window);
+    if present Simp.swap_buffers(window);
 }
 
 draw_editor_pane :: (using pane: *Editor_Pane, rect: Rect, root_pane_id: Ui_Id, unique_pane_id: int) {
@@ -1221,10 +1222,19 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
 
             cursor_pos_from_left := cursor_coords[main_cursor].pos.col  * char_x_advance + text_offset.x;
             cursor_pos_from_top  := cursor_coords[main_cursor].pos.line * line_height;
-            left_target          := cast(s32) max(cursor_pos_from_left - rect.w + char_x_advance * 3, 0);
-            top_target           := cast(s32) max(cursor_pos_from_top  - rect.h * context.config.settings.cursor_position_after_jump, -scroll_behind_height);
-            if left_target != scroll_x.target then start_animation(*viewport.scroll_x, viewport.left, left_target);
-            if top_target  != scroll_y.target then start_animation(*viewport.scroll_y, viewport.top,  top_target);
+            view_offset := rect.h * context.config.settings.cursor_position_after_jump;
+            if scroll_to_cursor == {
+                case .center; view_offset = rect.h * 0.5;
+                case .top;    view_offset = cast(float) line_height * VIM_SCROLLOFF;
+                case .bottom; view_offset = rect.h - cast(float) line_height * (VIM_SCROLLOFF + 1);
+            }
+            top_target := cast(s32) max(cursor_pos_from_top - view_offset, -scroll_behind_height);
+            if top_target != scroll_y.target then start_animation(*viewport.scroll_y, viewport.top, top_target);
+
+            if scroll_to_cursor == .yes {
+                left_target := cast(s32) max(cursor_pos_from_left - rect.w + char_x_advance * 3, 0);
+                if left_target != scroll_x.target then start_animation(*viewport.scroll_x, viewport.left, left_target);
+            }
 
             scroll_to_cursor = .no;
 
@@ -1623,7 +1633,9 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
                     continue;
                 }
 
-                screen_pos := get_cursor_screen_pos(text_origin, cursor_coords[it_index].pos);
+                cursor_draw_offset := vim_cursor_draw_offset(editor_id, cursor, it_index);
+                cursor_draw_coords := ifx cursor_draw_offset == cursor.pos then cursor_coords[it_index].pos else offset_to_coords(editor, buffer, cursor_draw_offset);
+                screen_pos := get_cursor_screen_pos(text_origin, cursor_draw_coords);
                 if screen_pos.x >= rect.x + rect.w || screen_pos.x + char_x_advance <= rect.x || screen_pos.y >= rect.y + rect.h || screen_pos.y + line_height < rect.y {
                     cursors_off_screen += 1;  // additional check for visibility (offset is not reliable)
                 }
@@ -1636,7 +1648,7 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
 
                 // Draw the letter on top for better visibility
                 if cursor_as_block {
-                    letter := get_char_at_offset_as_string(buffer, cursor.pos);
+                    letter := get_char_at_offset_as_string(buffer, cursor_draw_offset);
                     if letter != "\n" {
                         Simp.draw_text(get_font(.editor), xx cursor_rect.x, xx (cursor_rect.y + (line_height - char_x_advance) / 2), letter, xx Color.CHAR_UNDER_CURSOR);
                     }
@@ -2046,7 +2058,7 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
             case .bottom; draw_top_shadow(status_bar_rect);
             case .top; draw_bottom_shadow(status_bar_rect);
         }
-        file_info_offset = draw_status_bar(editor, buffer, pane, ui_id, status_bar_rect, status_bar_bg_color, buffer_settings, text_offset, cursors_off_screen);
+        file_info_offset = draw_status_bar(editor_id, editor, buffer, pane, ui_id, status_bar_rect, status_bar_bg_color, buffer_settings, text_offset, cursors_off_screen);
     }
 
     if should_show_pane_editors(pane) {
@@ -2189,7 +2201,7 @@ draw_pane_editors :: (pane: *Editor_Pane, main_area: Rect, text_offset: Vector2,
 
 }
 
-draw_status_bar :: (using editor: Editor, buffer: Buffer, pane: *Editor_Pane, editor_ui_id: Ui_Id, rect: Rect, status_bar_bg_color: Color, buffer_settings: *Settings, text_offset: Vector2, cursors_off_screen: int) -> file_info_offset: float {
+draw_status_bar :: (editor_id: s64, using editor: Editor, buffer: Buffer, pane: *Editor_Pane, editor_ui_id: Ui_Id, rect: Rect, status_bar_bg_color: Color, buffer_settings: *Settings, text_offset: Vector2, cursors_off_screen: int) -> file_info_offset: float {
     push_scissor(rect);
     defer pop_scissor();
 
@@ -2266,15 +2278,25 @@ draw_status_bar :: (using editor: Editor, buffer: Buffer, pane: *Editor_Pane, ed
             `pen_x -= 3 * padding;
         }
 
+        if vim_enabled() && pane == editors.active_pane {
+            _maybe_draw_separator();
+            label := vim_status_label();
+            width = xx Simp.prepare_text(get_font(.ui_bold), label);
+            pen_x -= width;
+            Simp.draw_prepared_text(get_font(.ui_bold), xx pen_x, xx pen.y, color = xx Color.UI_DEFAULT);
+        }
+
         // Draw line col
         if buffer_settings.status_bar_show_line_col {
             _maybe_draw_separator();
 
-            line := offset_to_real_line(buffer, editor.cursors[main_cursor].pos);
+            status_cursor_pos := vim_cursor_draw_offset(editor_id, editor.cursors[main_cursor], main_cursor);
+
+            line := offset_to_real_line(buffer, status_cursor_pos);
             col  := 0;
             {
                 // Do not count indented tabs here, only count each tab as one character.
-                start, end := buffer.line_starts[line], editor.cursors[main_cursor].pos;
+                start, end := buffer.line_starts[line], status_cursor_pos;
                 s := cast(string) to_view(buffer.bytes, start, end - start);
                 while s {
                     byte := s[0];
@@ -2284,7 +2306,7 @@ draw_status_bar :: (using editor: Editor, buffer: Buffer, pane: *Editor_Pane, ed
             }
 
             #if DEBUG {
-                width = xx Simp.prepare_text(get_font(.ui_bold), tprint("Offset: %  Line: %  Col: %", editor.cursors[main_cursor].pos, line + 1, col + 1));
+                width = xx Simp.prepare_text(get_font(.ui_bold), tprint("Offset: %  Line: %  Col: %", status_cursor_pos, line + 1, col + 1));
             } else {
                 width = xx Simp.prepare_text(get_font(.ui_bold), tprint("Line: %  Col: %", line + 1, col + 1));
             }
@@ -3633,6 +3655,36 @@ draw_go_to_line_dialog :: (active_editor_rect: Rect) {
 
     color := ifx go_to_line_dialog.input_is_valid then Color.UI_DEFAULT else Color.UI_ERROR;
     draw_text_input(*go_to_line_dialog.input, input_rect, ui_id = input_id, active = true, label = " line number", color = color);
+}
+
+draw_vim_command_line :: (active_editor_rect: Rect) {
+    input_id := get_ui_id_from_loc();
+
+    margin  := floor(8 * dpi_scale);
+    padding := floor(4 * dpi_scale);
+
+    height := get_font_line_height(.ui) + 2 * (margin + padding + 1);
+
+    bar_rect := cut_bottom(active_editor_rect, height);
+    if show_status_bar && !status_bar_is_drawn_at_the_top() then bar_rect.y += get_status_bar_height();
+
+    maybe_set_hot_or_active(input_id, bar_rect, .NORMAL);
+
+    draw_rounded_rect_with_shadow(bar_rect, Color.BACKGROUND_3, extra_draw_info = .{is_background = true});
+
+    prefix := vim_command_line_label();
+    prefix_width := cast(float) Simp.prepare_text(get_font(.ui), prefix);
+
+    pen := Vector2.{
+        x = bar_rect.x + margin,
+        y = bar_rect.y + (bar_rect.h - cast(s32)get_font(.ui).character_height) / 2 + 2,
+    };
+    Simp.draw_prepared_text(get_font(.ui), xx pen.x, xx pen.y, color = xx Color.UI_DEFAULT);
+
+    input_rect := shrink(bar_rect, margin);
+    input_rect = cut_right(input_rect, input_rect.w - (prefix_width + margin));
+
+    draw_text_input(*vim_command_line.input, input_rect, ui_id = input_id, active = true);
 }
 
 get_cursor_screen_pos :: (text_origin: Vector2, coords: Coords) -> Vector2 {

@@ -70,8 +70,10 @@ file_watcher_process_changes :: () {
         for external_changes color_preview_invalidate_theme(it.full_path);
 
         // TODO:
-        for project_changes   print("Project change: %\n", it);
-        for external_changes  print("External change: %\n", it);
+        #if DEBUG {
+            for project_changes   print("Project change: %\n", it);
+            for external_changes  print("External change: %\n", it);
+        }
 
         // Most commonly we will receive only a single MODIFIED event for a single file (after saving a buffer)
         // In this case we don't want to rescan anything, but only if no other events were received in the same frame
@@ -141,8 +143,8 @@ file_watcher_process_changes :: () {
             refresh_buffer_from_disk_by_path(path = file.full_name);
         }
 
-        if dirs_to_scan {
-            print("Scanning dirs: %\n", dirs_to_scan);
+        #if DEBUG {
+            if dirs_to_scan  print("Scanning dirs: %\n", dirs_to_scan);
         }
 
         // @Speed: this may be super expensive on crazy projects like Unreal,
@@ -259,12 +261,14 @@ maybe_process_file_or_directory_moves :: (changes_ptr: *[] File_Change) {
     }
 
     // At this point we've determined that we have 2 correct MOVED events
-    if is_directory(moved_to) {
-        // Move dir (TODO)
-        print("Moving dir '%' to '%'\n", moved_from, moved_to);
-    } else {
-        // Move file
-        print("Moving file '%' to '%'\n", moved_from, moved_to);
+    #if DEBUG {
+        if is_directory(moved_to) {
+            // Move dir (TODO)
+            print("Moving dir '%' to '%'\n", moved_from, moved_to);
+        } else {
+            // Move file
+            print("Moving file '%' to '%'\n", moved_from, moved_to);
+        }
     }
 }
 

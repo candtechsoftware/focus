@@ -533,6 +533,9 @@ ADDED_SETTINGS :: Added_Setting.[
     .{ 24, "show_tab_characters_in_selection",                   "true" },
 
     .{ 25, "line_endings",                                       "preserve  # options: lf, crlf, preserve" },
+
+    .{ 27, "vim_mode",                                           "true" },
+    .{ 27, "autocomplete_on_tab",                                "true" },
 ];
 
 RENAMED_SETTINGS :: Renamed_Setting.[

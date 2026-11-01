@@ -231,13 +231,16 @@ main :: () {
                 case .kill_running_command_dialog;  handled = dialog_handle_event(*kill_running_command_dialog, event);
                 case .theme_dialog;                 handled = theme_dialog_handle_event(event);
                 case .language_dialog;              handled = language_dialog_handle_event(event);
+                case .vim_command_line;             handled = vim_command_line_handle_event(event);
             }
 
-            if !handled {
+            vim_swallowed := vim_swallows_keyboard_event(event);
+
+            if !handled && !vim_swallowed {
                 action := map_event_to_action(event, Action_Editors);
                 handled = handle_common_editor_action(action, event = *event);
             }
-            if !handled {
+            if !handled && !vim_swallowed {
                 action := map_event_to_action(event, Action_Build);
                 handled = maybe_execute_a_build_command(action);
             }
@@ -275,7 +278,20 @@ main :: () {
         maybe_revert_temporary_theme();
         adjust_viewports_for_line_height_change(*previous_line_height);
         refresh_open_buffers();
+        vim_reconcile();
+        completion_update();
 
+        if mouse.left.just_pressed && mouse.moved_this_frame {
+            pressed, scroll_x, scroll_y := mouse.left, mouse.scroll_x_delta, mouse.scroll_y_delta;
+            mouse.left.just_pressed = false;
+            mouse.left.is_down = false;
+            mouse.scroll_x_delta = 0;
+            mouse.scroll_y_delta = 0;
+            draw_frame(present = false);
+            mouse.left = pressed;
+            mouse.scroll_x_delta = scroll_x;
+            mouse.scroll_y_delta = scroll_y;
+        }
         draw_frame();
 
         pointer_end_frame();
@@ -406,6 +422,7 @@ maybe_execute_a_build_command :: (action: Action_Build) -> handled: bool {
     if action == INVALID_KEYMAP_ACTION return false;
 
     command_id := cast(s64) action;
+    vim.last_build_command = command_id;
     assert(command_id <= context.config.build.commands.count, "A keymap was bound to a nonexistent build command %. Number of build commands: %. This is a bug", command_id, context.config.build.commands.count);
 
     if context.config.settings.save_all_file_backed_buffers_on_build {
@@ -880,6 +897,7 @@ Active_Global_Widget :: enum {
     kill_running_command_dialog;
     theme_dialog;
     language_dialog;
+    vim_command_line;
 }
 
 Project_Dir :: struct {
@@ -969,6 +987,13 @@ focus_allocator: Allocator;
 #load "widgets/language_dialog.jai";
 #load "widgets/color_preview.jai";
 #load "widgets/color_picker.jai";
+
+#load "vim/bindings.jai";
+#load "vim/modes.jai";
+#load "vim/motions.jai";
+#load "vim/operators.jai";
+#load "vim/ex.jai";
+#load "completion.jai";
 
 #load "langs/common.jai";
 #load "langs/jai.jai";

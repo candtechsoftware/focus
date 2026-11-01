@@ -4,6 +4,11 @@
 editors_handle_event :: (event: Input.Event) -> handled: bool {
     mods := event.modifier_flags;
 
+    if completion_handle_event(event) return true;
+
+    vim_intercepted, vim_handled := vim_handle_event(event);
+    if vim_intercepted return vim_handled;
+
     if event.type == {
         case .KEYBOARD;
             if event.key_pressed {
@@ -46,7 +51,14 @@ activate_editors :: () {
     cursors_start_blinking();
 }
 
-editors_handle_file_drop :: (files: [] string) {
+editors_handle_file_drop :: (dropped: [] string) {
+    files := dropped;
+    files.count = 0;
+    for dropped  if is_absolute_path(it) && !is_directory(it) {
+        files.count += 1;
+        files[files.count - 1] = it;
+    }
+
     if editors_get_layout() == .Multi {
         // Defer handling to the drawing code because we only know the layout then
         just_dropped_files = files;
@@ -173,13 +185,10 @@ active_editor_handle_event :: (editor: *Editor, buffer: *Buffer, event: Input.Ev
     // We always want to put some actions in a separate edit group (e.g. block indent)
     new_group := false;
     for cursor : editor.cursors { if new_edit_group_required_for_action(action, cursor) { new_group = true; break; } }
-    if new_group || (to_float64_seconds(frame_time) - buffer.last_edit_time) >= EDIT_GROUP_TIMEOUT then new_edit_group(buffer, editor);  // do it before action
+    if vim_holds_undo_group() then new_group = false;
+    if new_group || edit_group_has_timed_out(buffer) then new_edit_group(buffer, editor);  // do it before action
 
-    // We want to remember where cursors were before we do any edits
-    if buffer.edits.count == 0 {
-        resize(*buffer.cursors, editor.cursors.count);
-        for * cursor, i : buffer.cursors { cursor.* = editor.cursors[i]; }
-    }
+    remember_cursors_before_first_edit(buffer, editor);
 
     keep_selection := false;
     enabled_whole_words := false;
@@ -400,15 +409,11 @@ active_editor_type_char :: (char: u32) {
     new_group := false;  // we always want to remember cursor state when a selection is replaced with anything
     for editor.cursors { if has_selection(it) { new_group = true; break; } }
 
-    if new_group || (to_float64_seconds(frame_time) - buffer.last_edit_time) >= EDIT_GROUP_TIMEOUT {
+    if new_group || edit_group_has_timed_out(buffer) {
         new_edit_group(buffer, editor);
     }
 
-    if buffer.edits.count == 0 {
-        // We want to remember where cursors were before we do any edits
-        resize(*buffer.cursors, editor.cursors.count);
-        for * cursor, i : buffer.cursors { cursor.* = editor.cursors[i]; }
-    }
+    remember_cursors_before_first_edit(buffer, editor);
 
     offset_delta: s32 = 0;
     buf_len := cast(s32) buffer.bytes.count;
@@ -464,6 +469,10 @@ active_editor_type_char :: (char: u32) {
     editor.cursor_moved = true;
     cursors_start_blinking();
     if !is_empty(editor.search_bar.results) then search_and_update_results(editor, buffer, jump = false);
+}
+
+edit_group_has_timed_out :: (buffer: *Buffer) -> bool {
+    return (to_float64_seconds(frame_time) - buffer.last_edit_time) >= EDIT_GROUP_TIMEOUT && !vim_holds_undo_group();
 }
 
 maybe_deactivate_lingering_actions :: () {
@@ -979,7 +988,7 @@ go_to_line :: (editor: *Editor, buffer: Buffer, line: s64, col: s32 = -1) {
     cursor := leave_only_original_cursor(editor);
     if col < 0 {
         cursor.pos = line_start + count_whitespace(buffer.bytes, line_start, line_end);
-        cursor.sel = line_end;  // to make the line visible
+        cursor.sel = ifx vim_enabled() then cursor.pos else line_end;  // to make the line visible
     } else {
         cursor.pos = line_start + count_bytes_knowing_number_of_chars(buffer.bytes, line_start, line_end, col - 1);
         if cursor.pos > line_end then cursor.pos = line_end;
@@ -1685,7 +1694,7 @@ jump_to_search_result :: (result: Text_Highlight) {
     match_end   := min(result.offset + result.count, xx buffer.bytes.count);
     cursor := leave_only_original_cursor(editor);
     cursor.sel = xx match_start;
-    cursor.pos = xx match_end;
+    cursor.pos = xx ifx vim_enabled() then match_start else match_end;
 
     editor.scroll_to_cursor = .yes;
 }
@@ -2220,7 +2229,7 @@ jump_to_search_result :: (using editor: *Editor, buffer: Buffer, move_search_poi
     result := results[selected_result];
     cursor := leave_only_original_cursor(editor);
     cursor.sel = xx result.offset;
-    cursor.pos = xx (result.offset + result.count);
+    cursor.pos = xx ifx vim_enabled() then result.offset else result.offset + result.count;
     scroll_to_cursor = .yes;
 
     if move_search_point {
@@ -2559,6 +2568,12 @@ find_or_create_editor :: (buffer_id: s64, unwanted_existing_editors: [] s64 = .[
     return editor_id, true;
 }
 
+remember_cursors_before_first_edit :: (buffer: *Buffer, editor: *Editor) {
+    if buffer.edits.count > 0 return;
+    resize(*buffer.cursors, editor.cursors.count);
+    for * cursor, i : buffer.cursors { cursor.* = editor.cursors[i]; }
+}
+
 new_edit_group :: (buffer: *Buffer, editor: *Editor) {
     if buffer.edits.count == 0 return;
 
@@ -2711,6 +2726,8 @@ create_cursors_around :: (using editor: *Editor, buffer: Buffer) {
     cursor_moved = true;
 }
 
+#scope_export
+
 restore_cursor_state :: (using editor: *Editor, cursor_state: [] Cursor) {
     if cursor_state.count == 0 return;
 
@@ -2723,6 +2740,8 @@ restore_cursor_state :: (using editor: *Editor, cursor_state: [] Cursor) {
 
     editor.cursor_moved = true;
 }
+
+#scope_file
 
 // @TODO: have another look at the code and at the very least avoid rescanning for each cursor.
 // Also, check potential corner cases.
@@ -4995,7 +5014,7 @@ Editor :: struct {
 
     last_width_in_chars: s32 = S32_MAX;
 
-    scroll_to_cursor: enum u8 { no; yes; }  // trigger a scroll so that the cursor is in the center vertically
+    scroll_to_cursor: enum u8 { no; yes; center; top; bottom; }
     line_wrap:        enum u8 { off; to_enable; to_disable; on; };
     refresh_selection  := false;
     search_whole_words := false;  // used when creating new cursors
