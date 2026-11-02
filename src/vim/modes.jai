@@ -284,7 +284,7 @@ vim_handle_event :: (event: Input.Event) -> intercepted: bool, handled: bool {
             key := vim_key_from_event(event);
 
             if vim.mode == .insert {
-                if key == VIM_KEY_ESC {
+                if key == VIM_KEY_ESC || (key == VIM_KEY_ENTER && event.shift_pressed) {
                     vim_handle_key(key);
                     return true, true;
                 }
@@ -358,8 +358,11 @@ vim_handle_key :: (key: u32) -> bound: bool {
     lookup, binding := vim_lookup_binding(keys, vim_mode_flag(vim.mode));
     if lookup == {
         case .none;
+            retry_as_new_command := vim.key_count > 1 && vim.mode != .operator_pending;
             vim_cancel_pending();
-            return false;
+            if !retry_as_new_command return false;
+            if !vim.replaying then array_reset_keeping_memory(*vim.current_record);
+            return vim_handle_key(key);
 
         case .partial;
             return true;

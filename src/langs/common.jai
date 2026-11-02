@@ -398,31 +398,163 @@ Token_Type :: enum u8 {
     deletion;
 }
 
-C_Family_Enum_Highlight :: struct {
+C_Symbol_Kind :: enum u8 {
+    none;
+    function;
+    type;
+    enum_variant;
+    macro;
+    modifier;
+}
+
+C_Symbol :: struct {
+    name: string;
+    kind: C_Symbol_Kind;
+}
+
+c_symbols: struct {
+    table: Table(string, C_Symbol_Kind);
+    pool: Flat_Pool;
+    lock: Mutex;
+    generation: s32;
+};
+
+c_symbols_reset :: () {
+    init(*c_symbols.lock);
+    table_reset(*c_symbols.table);
+    reset(*c_symbols.pool);
+    c_symbols.generation += 1;
+}
+
+c_symbol_kind :: (name: string) -> C_Symbol_Kind {
+    if !workspace_scan_complete return .none;
+    found, kind := table_find(*c_symbols.table, name);
+    if !found return .none;
+    return kind;
+}
+
+C_Family_Symbols :: struct {
     after_enum_keyword: bool;
     expect_value_name: bool;
     after_scope: bool;
     body_depth: s32;
     colon_end: s32 = -1;
+
+    expect_type_name: bool;
+    using_name: string;
+    expect_using_name: bool;
+
+    typedef_active: bool;
+    typedef_name_locked: bool;
+    typedef_name_is_pointer: bool;
+    typedef_depth: s32;
+    typedef_name: string;
+
+    define_stage: enum u8 { none; name; value; modifier_value; };
+    define_name: string;
+
+    brace_depth: s32;
+    found: [..] C_Symbol;
 }
-c_family_mark_enum_value :: (buffer: *Buffer, using state: *C_Family_Enum_Highlight, token: *Base_Token, prev_token: *Base_Token) {
+
+c_family_track_token :: (buffer: *Buffer, using state: *C_Family_Symbols, token: *Base_Token, prev_token: *Base_Token) {
+    if token.type == .comment || token.type == .multiline_comment return;
+
     text := cast(string) to_view(buffer.bytes, token.start, token.len);
 
-    if token.type == .identifier {
-        is_enum_value := is_all_caps_identifier(text) || (after_scope && is_upper(text[0]));
-        if body_depth == 1 && expect_value_name {
-            is_enum_value = true;
-            expect_value_name = false;
+    if define_stage != .none {
+        gap := cast(string) to_view(buffer.bytes, prev_token.start + prev_token.len, token.start - prev_token.start - prev_token.len);
+        same_line := !contains(gap, #char "\n");
+        if define_stage == {
+            case .name;
+                define_stage = .none;
+                if same_line && token.type == .identifier {
+                    define_name = text;
+                    define_stage = .value;
+                }
+            case .value;
+                if same_line && token.type == .modifier {
+                    define_stage = .modifier_value;
+                } else {
+                    c_family_record(state, define_name, .macro);
+                    define_stage = .none;
+                }
+            case .modifier_value;
+                c_family_record(state, define_name, ifx same_line then C_Symbol_Kind.macro else .modifier);
+                define_stage = .none;
         }
-        if is_enum_value then token.type = .enum_variant;
+    }
+
+    if token.type == .directive && ends_with(text, "define") {
+        define_stage = .name;
+        return;
+    }
+
+    if token.type == .identifier {
+        if expect_type_name {
+            c_family_record(state, text, .type);
+            expect_type_name = false;
+        }
+        if expect_using_name {
+            using_name = text;
+            expect_using_name = false;
+        }
+        if typedef_active && !typedef_name_locked {
+            if typedef_name_is_pointer {
+                typedef_name = text;
+                typedef_name_locked = true;
+            } else if typedef_depth == 0 {
+                typedef_name = text;
+            }
+        }
+
+        if body_depth == 1 && expect_value_name {
+            c_family_record(state, text, .enum_variant);
+            token.type = .enum_variant;
+            expect_value_name = false;
+        } else if #complete c_symbol_kind(text) == {
+            case .type;         token.type = .type;
+            case .enum_variant; token.type = .enum_variant;
+            case .macro;        token.type = .macro;
+            case .modifier;     token.type = .modifier;
+            case .none;         #through;
+            case .function;
+                if is_all_caps_identifier(text) || (after_scope && is_upper(text[0])) then token.type = .enum_variant;
+        }
         after_scope = false;
         return;
     }
 
-    if text == "enum" {
-        after_enum_keyword = true;
-        return;
+    pending_using_name := using_name;
+    using_name = "";
+    if token.type == .keyword {
+        if text == {
+            case "enum";
+                after_enum_keyword = true;
+                expect_type_name = true;
+                return;
+            case "struct"; #through;
+            case "union";
+                expect_type_name = true;
+                return;
+            case "class";
+                prev_text := cast(string) to_view(buffer.bytes, prev_token.start, prev_token.len);
+                expect_type_name = prev_text != "<" && prev_text != ",";
+                return;
+            case "using";
+                expect_using_name = true;
+                return;
+            case "typedef";
+                typedef_active = true;
+                typedef_name_locked = false;
+                typedef_name_is_pointer = false;
+                typedef_depth = 0;
+                typedef_name = "";
+                return;
+        }
     }
+    expect_type_name = false;
+    expect_using_name = false;
 
     is_symbol := (token.type == .punctuation || token.type == .operation) && token.len == 1;
     after_scope = is_symbol && text[0] == #char ":" && colon_end == token.start;
@@ -434,12 +566,28 @@ c_family_mark_enum_value :: (buffer: *Buffer, using state: *C_Family_Enum_Highli
             starts_scope := colon_end < buffer.bytes.count && buffer.bytes[colon_end] == #char ":";
             if starts_scope && prev_token.type == .enum_variant then memset(buffer.tokens.data + prev_token.start, xx Token_Type.identifier, prev_token.len);
         case #char "(";
+            if typedef_active {
+                if typedef_depth == 0 && !typedef_name_locked {
+                    after_paren := token.start + 1 + count_whitespace(buffer.bytes, token.start + 1, cast(s32) buffer.bytes.count);
+                    if after_paren < buffer.bytes.count && buffer.bytes[after_paren] == #char "*" {
+                        typedef_name_is_pointer = true;
+                    } else if typedef_name && typedef_name.data == buffer.bytes.data + prev_token.start {
+                        typedef_name_locked = true;
+                    }
+                }
+                typedef_depth += 1;
+            } else if brace_depth == 0 && prev_token.type == .identifier {
+                c_family_record(state, cast(string) to_view(buffer.bytes, prev_token.start, prev_token.len), .function);
+            }
             if prev_token.type == .enum_variant then memset(buffer.tokens.data + prev_token.start, xx Token_Type.function, prev_token.len);
             after_enum_keyword = false;
             if body_depth then body_depth += 1;
         case #char "[";
+            if typedef_active then typedef_depth += 1;
             if body_depth then body_depth += 1;
         case #char "{";
+            brace_depth += 1;
+            if typedef_active then typedef_depth += 1;
             if after_enum_keyword {
                 after_enum_keyword = false;
                 body_depth = 1;
@@ -447,18 +595,54 @@ c_family_mark_enum_value :: (buffer: *Buffer, using state: *C_Family_Enum_Highli
             } else if body_depth {
                 body_depth += 1;
             }
-        case #char ")"; #through;
-        case #char "]"; #through;
         case #char "}";
+            if brace_depth then brace_depth -= 1;
+            #through;
+        case #char ")"; #through;
+        case #char "]";
+            if typedef_active then typedef_depth -= 1;
             after_enum_keyword = false;
             if body_depth then body_depth -= 1;
         case #char ",";
             after_enum_keyword = false;
             if body_depth == 1 then expect_value_name = true;
-        case #char ";"; #through;
+        case #char ";";
+            after_enum_keyword = false;
+            if typedef_active && typedef_depth == 0 {
+                if typedef_name then c_family_record(state, typedef_name, .type);
+                typedef_active = false;
+            }
         case #char "=";
             after_enum_keyword = false;
+            if pending_using_name then c_family_record(state, pending_using_name, .type);
     }
+}
+
+c_family_finish_symbols :: (buffer: *Buffer, using state: *C_Family_Symbols) {
+    if define_stage == .value then c_family_record(state, define_name, .macro);
+    if define_stage == .modifier_value then c_family_record(state, define_name, .modifier);
+    if buffer.modified || !found.count return;
+
+    lock(*c_symbols.lock);
+    defer unlock(*c_symbols.lock);
+
+    table_changed := false;
+    for found {
+        existing := table_find_pointer(*c_symbols.table, it.name);
+        if !existing {
+            table_add(*c_symbols.table, copy_string(it.name,, allocator_of(*c_symbols.pool)), it.kind);
+            table_changed = true;
+        } else if it.kind > existing.* {
+            existing.* = it.kind;
+            table_changed = true;
+        }
+    }
+    if table_changed && workspace_scan_complete then c_symbols.generation += 1;
+}
+
+c_family_record :: (using state: *C_Family_Symbols, name: string, kind: C_Symbol_Kind) {
+    found.allocator = temp;
+    array_add(*found, C_Symbol.{ name, kind });
 }
 
 is_all_caps_identifier :: (text: string) -> bool {

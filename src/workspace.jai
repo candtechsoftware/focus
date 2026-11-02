@@ -132,6 +132,8 @@ start_workspace_scan :: () {
 
 complete_workspace_scan :: () {
     workspace_scan_complete = true;
+    c_symbols.generation += 1;
+    redraw_requested = true;
     reset(*scan_memory_pool);
     release_config_snapshot(scan_config_snapshot);
     scan_config_snapshot = null;

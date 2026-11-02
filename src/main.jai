@@ -183,6 +183,8 @@ main :: () {
                     defer_action_quit();
 
                 case .KEYBOARD;
+                    if event.key_pressed then num_text_input_events_to_ignore = 0;
+
                     // Double shift click
                     if context.config.settings.double_shift_to_search_in_workspace && event.key_code == .SHIFT {
                         using shift_key;

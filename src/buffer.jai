@@ -513,6 +513,7 @@ retokenize :: (buffer: *Buffer) {
 
     assert(!buffer.dirty);
     buffer.needs_tokenizing = false;
+    buffer.symbols_generation = c_symbols.generation;
 
     if buffer.lang == .Plain_Text {
         // We don't store tokens for plain text buffers
@@ -549,7 +550,7 @@ retokenize :: (buffer: *Buffer) {
 
 buffer_needs_tokenizing :: (buffer: Buffer) -> bool {
     return
-        (buffer.needs_tokenizing || buffer.tokens.count != buffer.bytes.count) &&
+        (buffer.needs_tokenizing || buffer.tokens.count != buffer.bytes.count || ((buffer.lang == .C || buffer.lang == .Cpp) && buffer.symbols_generation != c_symbols.generation)) &&
         (get_tokenize_function(buffer.lang) != null || buffer.tokens.count > 0);
 }
 
@@ -838,6 +839,7 @@ save_buffer :: (using buffer: *Buffer) -> success: bool {
 
     if success {
         modified = false;
+        needs_tokenizing = true;
         modified_on_disk = false;
         deleted = false;
 
@@ -1849,6 +1851,7 @@ Buffer :: struct {
     deleted                := false;
     internal               := false;  // e.g. build panel, default config etc.
     needs_tokenizing       := false;
+    symbols_generation     : s32;
     readonly               := false;
     binary                 := false;
     error_when_saving      := false;

@@ -1564,8 +1564,8 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
                 screen_pos := get_cursor_screen_pos(text_origin, cursor_coords[it_index].pos);
 
                 rect := make_rect(screen_pos.x, screen_pos.y, char_x_advance, line_height);
-                draw_rounded_rect(rect, Color.CURSOR, radius = get_rounding_radius_small(), set_shader = true);
-                draw_rounded_rect(shrink(rect, 1), Color.BACKGROUND_0, radius = get_rounding_radius_small(), set_shader = false);
+                draw_rounded_rect(rect, Color.CURSOR, radius = get_cursor_radius(rect.w), set_shader = true);
+                draw_rounded_rect(shrink(rect, 1), Color.BACKGROUND_0, radius = get_cursor_radius(rect.w), set_shader = false);
             }
         }
 
@@ -1644,7 +1644,7 @@ draw_editor :: (editor_id: s64, main_area: Rect, ui_id: Ui_Id, pane: *Editor_Pan
 
                 cursor_rect := make_rect(screen_pos.x, screen_pos.y, cursor_width, line_height);
                 cursor_rect = align_to_grid(cursor_rect);
-                draw_rounded_rect(cursor_rect, Color.CURSOR, radius = get_rounding_radius_small(), set_shader = true);
+                draw_rounded_rect(cursor_rect, Color.CURSOR, radius = get_cursor_radius(cursor_rect.w), set_shader = true);
 
                 // Draw the letter on top for better visibility
                 if cursor_as_block {
@@ -2358,7 +2358,7 @@ draw_status_bar :: (editor_id: s64, using editor: Editor, buffer: Buffer, pane: 
             cursor_y := status_bar_rect.y + (status_bar_rect.h - get_line_height()) / 2;
             cursor_rect := align_to_grid(make_rect(cursor_indicator_x - cursor_width - padding, cursor_y, cursor_width, get_line_height()));
 
-            if should_draw_cursors() then draw_rounded_rect(cursor_rect, Color.CURSOR, radius = get_rounding_radius_small(), set_shader = true);
+            if should_draw_cursors() then draw_rounded_rect(cursor_rect, Color.CURSOR, radius = get_cursor_radius(cursor_rect.w), set_shader = true);
 
             hover_rect := Rect.{ cursor_rect.x - padding, status_bar_rect.y, cursor_rect.w + padding + width + 2 * padding, status_bar_rect.h };
             cursor_number_id := get_ui_id_from_loc(parent_id = editor_ui_id);

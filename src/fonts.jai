@@ -122,6 +122,10 @@ get_rounding_radius_small :: inline () -> float {
     return floor(get_char_size() / 3);
 }
 
+get_cursor_radius :: inline (cursor_width: float) -> float {
+    return min(get_char_x_advance() * 0.4, cursor_width / 2);
+}
+
 get_status_bar_height :: inline () -> float {
     return get_font_line_height(.ui) * 1.6;
 }

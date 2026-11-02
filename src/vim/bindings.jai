@@ -135,6 +135,13 @@ Vim_Action :: enum u16 {
     next_build_error;
     previous_build_error;
     cycle_panes;
+    pane_left;
+    pane_right;
+    pane_up;
+    pane_down;
+    split_right;
+    split_below;
+    close_pane;
     alternate_buffer;
 }
 
@@ -382,7 +389,21 @@ vim_build_bindings :: () -> [] Vim_Binding {
     action("<leader>x", .kill_build);
     action("<C-k>", .next_build_error);
     action("<C-j>", .previous_build_error);
-    action("<C-,>", .cycle_panes);
+    action("<C-,>", .cycle_panes, VIM_NV);
+    action("<C-w>h", .pane_left, VIM_NV);
+    action("<C-w>j", .pane_down, VIM_NV);
+    action("<C-w>k", .pane_up, VIM_NV);
+    action("<C-w>l", .pane_right, VIM_NV);
+    action("<C-w><C-h>", .pane_left, VIM_NV);
+    action("<C-w><C-j>", .pane_down, VIM_NV);
+    action("<C-w><C-k>", .pane_up, VIM_NV);
+    action("<C-w><C-l>", .pane_right, VIM_NV);
+    action("<C-w>w", .cycle_panes, VIM_NV);
+    action("<C-w><C-w>", .cycle_panes, VIM_NV);
+    action("<C-w>v", .split_right, VIM_NV);
+    action("<C-w>s", .split_below, VIM_NV);
+    action("<C-w>q", .close_pane, VIM_NV);
+    action("<C-w>c", .close_pane, VIM_NV);
     action("<C-.>", .alternate_buffer);
 
     return table;

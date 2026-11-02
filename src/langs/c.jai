@@ -3,7 +3,7 @@ tokenize_c :: (using buffer: *Buffer, start_offset := -1, count := -1) -> [] Buf
 
     // Allocate temporary space for tracking one previous token
     tokenizer.prev_tokens[0] = New(Token,, temp);
-    enum_highlight: C_Family_Enum_Highlight;
+    symbols: C_Family_Symbols;
 
     while true {
         token := get_next_token(*tokenizer);
@@ -21,12 +21,14 @@ tokenize_c :: (using buffer: *Buffer, start_offset := -1, count := -1) -> [] Buf
             }
         }
 
-        c_family_mark_enum_value(buffer, *enum_highlight, *token.base, *prev_token.base);
+        c_family_track_token(buffer, *symbols, *token.base, *prev_token.base);
 
         prev_token.* = token;
 
         highlight_token(buffer, token);
     }
+
+    c_family_finish_symbols(buffer, *symbols);
 
     return .[];
 }

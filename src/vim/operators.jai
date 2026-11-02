@@ -534,6 +534,13 @@ vim_run_action :: (editor: *Editor, buffer: *Buffer, action: Vim_Action, key: u3
         case .previous_build_error; handle_common_editor_action(.go_to_previous_build_error);
 
         case .cycle_panes;        vim_cycle_panes();
+        case .pane_left;          handle_common_editor_action(.switch_to_left_pane);
+        case .pane_right;         handle_common_editor_action(.switch_to_right_pane);
+        case .pane_up;            handle_common_editor_action(.switch_to_top_pane);
+        case .pane_down;          handle_common_editor_action(.switch_to_bottom_pane);
+        case .split_right;        action_duplicate_editor(.right);
+        case .split_below;        action_duplicate_editor(.bottom);
+        case .close_pane;         vim_ex_quit_pane(false);
         case .alternate_buffer;   vim_alternate_buffer();
     }
 }

@@ -2276,6 +2276,7 @@ init_buffers :: () {
     // most codebases will hopefully not exceed (so that we don't have to grow the hash table)
     table_resize(*buffers_table, 3000);
     init(*open_buffers_lock);
+    c_symbols_reset();
 
     global_config_buffer_id = -1;
     global_troubleshooting_buffer_id = -1;

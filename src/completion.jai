@@ -59,6 +59,7 @@ completion: struct {
     order: [..] s32;
     selected_row: s32 = -1;
     pending_steps: s32;
+    include_text_words: bool;
 
     pool: Flat_Pool;
 };
@@ -103,9 +104,11 @@ completion_match :: (word: string, needle: string) -> matched: bool, score: s32 
     next := 0;
     last_match := -1;
     score: s32;
+    same_case := true;
     for 0 .. word.count - 1 {
         if next >= needle.count break;
         if to_lower(word[it]) != to_lower(needle[next]) continue;
+        if word[it] != needle[next] then same_case = false;
 
         at_boundary := it > 0 && (word[it - 1] == #char "_" || (is_lower(word[it - 1]) && is_upper(word[it])));
         if next == 0 {
@@ -123,7 +126,7 @@ completion_match :: (word: string, needle: string) -> matched: bool, score: s32 
     }
     if next < needle.count return false, 0;
 
-    return true, score;
+    return true, ifx same_case then score + 1 else score;
 }
 
 completion_clear_items :: () {
@@ -331,6 +334,8 @@ completion_start_scan :: (editor: *Editor, buffer: *Buffer) {
     pass = .open;
     buffer_index = 0;
     offset = 0;
+    needle_start := editor.cursors[editor.main_cursor].pos - needle.count;
+    include_text_words = needle_start >= 0 && needle_start < buffer.tokens.count && completion_token_is_text(buffer.tokens[needle_start]);
 
     lock(*buffer.content_lock);
     completion_scan_buffer(buffer, .file, editor, 0);
@@ -390,7 +395,9 @@ completion_scan_buffer :: (buffer: *Buffer, tier: Completion_Tier, current_edito
 
     bytes := buffer.bytes.data;
     count := buffer.bytes.count;
-    check_declared := buffer.lang == .Jai;
+    is_jai := buffer.lang == .Jai;
+    is_c_family := buffer.lang == .C || buffer.lang == .Cpp;
+    skip_text_words := !include_text_words && buffer.tokens.count == count;
 
     i := start_offset;
     next_time_check := i + COMPLETION_TIME_CHECK_BYTES;
@@ -409,6 +416,7 @@ completion_scan_buffer :: (buffer: *Buffer, tier: Completion_Tier, current_edito
 
         length := i - word_start;
         if length > COMPLETION_MAX_WORD || ascii_is_digit(bytes[word_start]) continue;
+        if skip_text_words && completion_token_is_text(buffer.tokens[word_start]) continue;
 
         word := string.{ length, bytes + word_start };
         matched, score := completion_match(word, needle);
@@ -423,9 +431,11 @@ completion_scan_buffer :: (buffer: *Buffer, tier: Completion_Tier, current_edito
         }
 
         declared := false;
-        if check_declared {
+        if is_jai {
             after := i + count_whitespace(buffer.bytes, xx i, xx count);
             declared = after < count && bytes[after] == #char ":";
+        } else if is_c_family {
+            declared = c_symbol_kind(word) != .none;
         }
 
         distance: s32 = S32_MAX;
@@ -436,6 +446,23 @@ completion_scan_buffer :: (buffer: *Buffer, tier: Completion_Tier, current_edito
     }
 
     return count;
+}
+
+completion_token_is_text :: (type: Token_Type) -> bool {
+    if type == {
+        case .comment; #through;
+        case .multiline_comment; #through;
+        case .comment_highlight1; #through;
+        case .comment_highlight2; #through;
+        case .comment_highlight3; #through;
+        case .comment_highlight4; #through;
+        case .string_literal; #through;
+        case .multiline_string; #through;
+        case .raw_string; #through;
+        case .char_literal;
+            return true;
+    }
+    return false;
 }
 
 completion_add_word :: (word: string, tier: Completion_Tier, distance: s32, score: s32, declared: bool) {

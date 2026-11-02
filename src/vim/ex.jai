@@ -587,6 +587,8 @@ vim_report_write :: (buffer: *Buffer) -> success: bool {
     return true;
 }
 
+#scope_export
+
 vim_ex_quit_pane :: (bang: bool) {
     if editors.active_pane && editors.active_pane.parent {
         action_close_pane(.in_place);
@@ -594,6 +596,8 @@ vim_ex_quit_pane :: (bang: bool) {
     }
     vim_ex_quit_application(bang);
 }
+
+#scope_file
 
 vim_ex_quit_application :: (discard_changes: bool) {
     if discard_changes {
