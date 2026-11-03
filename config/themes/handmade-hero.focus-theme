@@ -1,115 +1,116 @@
 [26]  # Version number. Do not delete.
 
-# Based on Casey Muratori's emacs theme used on Handmade Hero series
+# Palette: ~/gits/coder/4coder-non-source/themes/theme-handmade-hero.4coder
+# Includes Fleury semantic colors for functions, types, macros and punctuation.
 
 [colors]
 
-background0:                            161616FF
-background1:                            141414FF
-background2:                            18262FFF # unused
-background3:                            121212FF
-background4:                            121212FF
-selection_active:                       0100CDFF
-selection_inactive:                     0100CD7F
-selection_highlight:                    FCEDFC26 # todo
-search_result_active:                   B55F75FF
-search_result_inactive:                 B55F754C
+background0:                            0C0C0CFF
+background1:                            1F1F27FF
+background2:                            1A1A1EFF
+background3:                            1F1F27FF
+background4:                            1A1A1EFF
+selection_active:                       315268FF
+selection_inactive:                     3152687F
+selection_highlight:                    2F2F37FF
+search_result_active:                   315268FF
+search_result_inactive:                 3152684C
 scrollbar:                              CDAA7D19
 scrollbar_hover:                        CDAA7D4C
 scrollbar_background:                   CDAA7D11
-cursor:                                 40FF40FF
-cursor_inactive:                        40FF4011
-paste_animation:                        0100CDFF
-splitter:                               CDAA7D19
-splitter_hover:                         CDAA7D4C
-letter_highlight:                       B8860BFF
-list_cursor_lite:                       CDAA7D19
-list_cursor:                            CDAA7D4C
+cursor:                                 00EE00FF
+cursor_inactive:                        404040FF
+paste_animation:                        FFBB00FF
+splitter:                               1A1A1EFF
+splitter_hover:                         2A2A30FF
+letter_highlight:                       70971EFF
+list_cursor_lite:                       1A1E22FF
+list_cursor:                            202A34FF
 shadow_dark:                            1010107F
 shadow_transparent:                     10101000
-text_input_label:                       7F7F7FFF
-char_under_cursor:                      161616FF
+text_input_label:                       686868FF
+char_under_cursor:                      0C0C0CFF
 
-ui_default:                             CDAA7DFF
-ui_dim:                                 7F7F7FFF
-ui_neutral:                             7F7F7FFF
+ui_default:                             A08563FF
+ui_dim:                                 686868FF
+ui_neutral:                             494949FF
 ui_warning:                             FFAD34FF # todo
 ui_warning_dim:                         986032FF # todo
 ui_error:                               772222FF # todo
 ui_error_bright:                        FF0000FF # todo
 ui_success:                             227722FF # todo
 
-region_scope_export:                    161616FF
-region_scope_file:                      161616FF
-region_scope_module:                    161616FF
-region_header:                          161616FF
+region_scope_export:                    0C0C0CFF
+region_scope_file:                      0C0C0CFF
+region_scope_module:                    0C0C0CFF
+region_header:                          1F1F27FF
 region_success:                         227722FF # todo
 region_warning:                         986032FF # todo
 region_error:                           772222FF # todo
-region_heredoc:                         121212FF
+region_heredoc:                         0C0C0CFF
 
-build_panel_background:                 161616FF
+build_panel_background:                 0C0C0CFF
 build_panel_scrollbar:                  CDAA7D19
 build_panel_scrollbar_hover:            CDAA7D4C
 build_panel_scrollbar_background:       CDAA7D11
-build_panel_title_bar:                  121212FF
+build_panel_title_bar:                  1F1F27FF
 
-code_default:                           CDAA7DFF
-code_comment:                           7F7F7FFF
-code_type:                              B8860BFF
-code_function:                          CDAA7DFF
-code_punctuation:                       CDAA7DFF
-code_operation:                         CDAA7DFF
+code_default:                           A08563FF
+code_comment:                           686868FF
+code_type:                              D8A51DFF
+code_function:                          CC5735FF
+code_punctuation:                       907553FF
+code_operation:                         907553FF
 code_string_literal:                    6B8E23FF
 code_value:                             6B8E23FF
 code_highlight:                         D89B75FF # unused
 code_error:                             FF0000FF # todo
 code_warning:                           E4D97DFF # todo
-code_keyword:                           B8860BFF
+code_keyword:                           AC7B0BFF
 code_invalid:                           FF0000FF
 code_multiline_string:                  6B8E23FF
 code_raw_string:                        6B8E23FF
 code_char_literal:                      6B8E23FF
-code_identifier:                        BFC9DBFF
-code_note:                              E0AD82FF
-code_number:                            D699B5FF
-code_multiline_comment:                 87919DFF
-code_modifier:                          E67D74FF
-code_attribute:                         E67D74FF
-code_enum_variant:                      BFC9DBFF
-code_macro:                             E0AD82FF
-code_builtin_variable:                  D699B5FF
-code_builtin_function:                  E0AD82FF
-code_builtin_exception:                 E0AD82FF
-code_directive:                         E67D74FF
-code_directive_modifier:                E67D74FF
-code_header1:                           E67D74FF
-code_header2:                           E0AD82FF
-code_header3:                           E0AD82FF
-code_header4:                           E0AD82FF
-code_header5:                           E0AD82FF
-code_header6:                           E0AD82FF
+code_identifier:                        A08563FF
+code_note:                              00FF00FF
+code_number:                            6B8E23FF
+code_multiline_comment:                 686868FF
+code_modifier:                          AC7B0BFF
+code_attribute:                         478980FF
+code_enum_variant:                      478980FF
+code_macro:                             478980FF
+code_builtin_variable:                  478980FF
+code_builtin_function:                  CC5735FF
+code_builtin_exception:                 CC5735FF
+code_directive:                         DAB98FFF
+code_directive_modifier:                DAB98FFF
+code_header1:                           AC7B0BFF
+code_header2:                           AC7B0BFF
+code_header3:                           AC7B0BFF
+code_header4:                           AC7B0BFF
+code_header5:                           AC7B0BFF
+code_header6:                           AC7B0BFF
 
 # Added after migration to version [8]
-ruler:                                  40FF4011
-bracket_highlight:                      FCEDFC26
-indent_guide:                           FCEDFC26
+ruler:                                  101010FF
+bracket_highlight:                      B095734C
+indent_guide:                           9BA29030
 
 # Added after migration to version [17]
-active_pane_border:                     40FF4011
+active_pane_border:                     3A3A42FF
 
 # Added after migration to version [18]
-inactive_pane_dim_overlay:              050505FF
+inactive_pane_dim_overlay:              00000000
 
 # Added after migration to version [19]
-code_comment_highlight1:                E0AD82FF
+code_comment_highlight1:                00A000FF
 code_comment_highlight2:                FF0000FF
-code_comment_highlight3:                B8860BFF
+code_comment_highlight3:                00FF00FF
 code_comment_highlight4:                6B8E23FF
 
 # Added after migration to version [20]
-cursor_line_highlight:                  121212FF
-color_preview_title_bar:                121212FF
+cursor_line_highlight:                  1F1F27FF
+color_preview_title_bar:                1F1F27FF
 
 # Added after migration to version [21]
 code_addition:                          33B333FF

@@ -267,11 +267,18 @@ vim_paste_over_selection :: (editor: *Editor, buffer: *Buffer, count: s32, keep_
 vim_open_line :: (editor: *Editor, buffer: *Buffer, below: bool) {
     vim_edit_group(editor, buffer);
 
+    // Work out the indentation of the lines opened below upfront, before any edits move things around
+    below_indents := NewArray(editor.cursors.count, string, initialized = false,, allocator = temp);
+    if below {
+        scan := Bracket_Scan.{ tokens = tokenize_for_indentation(buffer) };  // the cursors go down the buffer, so one scan serves them all
+        for editor.cursors  below_indents[it_index] = get_indent_for_new_line(*scan, buffer, get_real_line_end_offset(buffer, offset_to_real_line(buffer, it.pos)));
+    }
+
     for :vim_cursors editor {
         line   := offset_to_real_line(buffer, it.pos);
         start  := get_real_line_start_offset(buffer, line);
         first  := vim_first_nonblank(buffer, line);
-        indent := get_range_as_string(buffer, .{ start, first });
+        indent := ifx below then below_indents[it_index] else get_range_as_string(buffer, .{ start, first });
         if vim_open_line_goes_deeper(buffer, line, first, below) {
             type, size := get_buffer_indentation_and_tab_size(buffer);
             indent = tprint("%1%2", indent, ifx type == .tabs then "\t" else get_tmp_spaces(size));

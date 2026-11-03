@@ -3472,23 +3472,16 @@ move_to_matching_bracket :: (using editor: *Editor, buffer: Buffer, keep_selecti
 break_line :: (editor: *Editor, buffer: *Buffer) {
     new_edit_group(buffer, editor);
 
-    // Remember by how much we need to indent the new lines upfront to avoid any scanning of the dirty buffer later
-    Space :: struct { start: s32; count: s32; original_start: s32; }  // not a string to avoid invalid pointers
-    space_per_cursor := NewArray(editor.cursors.count, Space, initialized = false,, allocator = temp);
+    // Work out the new lines' indentation upfront, before any edits move things around
+    scan := Bracket_Scan.{ tokens = tokenize_for_indentation(buffer) };  // the cursors go down the buffer, so one scan serves them all
+    indent_per_cursor := NewArray(editor.cursors.count, string, initialized = false,, allocator = temp);
     for cursor : editor.cursors {
-        selection := get_selection(cursor);
-        start := get_real_line_start_offset(buffer, offset_to_real_line(buffer, selection.start));
-        whitespace_bytes := count_whitespace(buffer.bytes, start, selection.start);
-        space_per_cursor[it_index] = .{ start = start, count = whitespace_bytes, original_start = start };
+        indent_per_cursor[it_index] = get_indent_for_new_line(*scan, buffer, get_selection(cursor).start);
     }
 
     offset_delta := 0;
     for * cursor : editor.cursors {
-        space := *space_per_cursor[it_index];
-        prev_space := space_per_cursor[max(it_index-1, 0)];
-        if space.original_start == prev_space.original_start then space.start = prev_space.start; else space.start += xx offset_delta;  // handle cursors on the same line well
-        space_str := cast(string) to_view(buffer.bytes, space.start, space.count);
-        insert_str := tprint("\n%", space_str);
+        insert_str := tprint("\n%", indent_per_cursor[it_index]);
 
         cursor.pos += xx offset_delta;
         cursor.sel += xx offset_delta;
@@ -3866,6 +3859,8 @@ autoindent_region :: (editor: *Editor, buffer: *Buffer) {
     replacements: [..] string;
     replacements.allocator = temp;
 
+    scan := Bracket_Scan.{ tokens = tokens };  // the ranges go down the buffer, so one scan serves them all
+
     for * line_range : line_ranges {
         // Determine the base indentation level by looking backwards at the first nonempty line
         base_level: int;
@@ -3903,7 +3898,13 @@ autoindent_region :: (editor: *Editor, buffer: *Buffer) {
             start, end: s32;
             current_delta, next_delta: int;
 
+            first_line := offset_to_real_line(buffer, line_range.start);
+            levels  := NewArray(lines_in_range.count, int,    initialized = false,, allocator = temp);
+            indents := NewArray(lines_in_range.count, string, initialized = false,, allocator = temp);  // what each line ends up indented with
+
             for line, i : lines_in_range {
+                line_num := first_line + cast(s32) i;
+
                 if line {
                     // Check the line's tokens to see if we need to change the indentation level
                     start = cast(s32) (line.data - buffer.bytes.data);
@@ -3917,14 +3918,37 @@ autoindent_region :: (editor: *Editor, buffer: *Buffer) {
 
                 if !offset_is_within_multiline_token(tokens, start) {
                     // Indent the line
-                    whitespace := ifx indentation_type == .spaces then get_tmp_spaces(level * tab_size) else get_tmp_tabs(level);
-                    append(*b, whitespace);
+                    indent := ifx indentation_type == .spaces then get_tmp_spaces(level * tab_size) else get_tmp_tabs(level);
+
+                    // Inside an unclosed ( or [ followed by text, line up with that text. Lines starting with a closing bracket keep the dedent.
+                    if line && current_delta == 0 {
+                        _, align_to := get_statement_line_and_alignment(*scan, buffer, start);
+                        if align_to >= 0 {
+                            align_line := offset_to_real_line(buffer, align_to);
+                            align_line_indent := ifx align_line >= first_line then indents[align_line - first_line] else get_real_line_indent(buffer, align_line);
+                            indent = get_alignment_whitespace(buffer, align_line_indent, align_to);
+                        }
+                    }
+
+                    indents[i] = indent;
+                    append(*b, indent);
                     append(*b, trim(line));
                     append(*b, "\n");
                 } else {
                     // Don't indent
+                    indents[i] = get_real_line_indent(buffer, line_num);
                     append(*b, line);
                     append(*b, "\n");
+                }
+                levels[i] = level;
+
+                // A line closing brackets opened on earlier lines continues from the level of the line where they were opened
+                if line {
+                    statement_line := get_statement_line_and_alignment(*scan, buffer, end);
+                    if statement_line < line_num {
+                        level = ifx statement_line >= first_line then levels[statement_line - first_line] else get_base_indent_from_line(buffer, statement_line, tokens, tab_size);
+                        next_delta = max(next_delta, 0);
+                    }
                 }
 
                 level = max(0, level + next_delta);

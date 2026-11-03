@@ -17,7 +17,7 @@ completion_update :: () {
     completion_refresh();
     if !completion.active return;
 
-    if completion.pass != .done {
+    if completion.pass != .done && completion.pending_steps {
         slice_start := current_time_monotonic();
         while completion.pass != .done && !completion_slice_expired(slice_start) {
             completion_scan_next_slice(slice_start);
@@ -60,6 +60,8 @@ completion: struct {
     selected_row: s32 = -1;
     pending_steps: s32;
     include_text_words: bool;
+    allow_typo: bool;
+    needle_exists: bool;
 
     pool: Flat_Pool;
 };
@@ -67,7 +69,12 @@ completion: struct {
 COMPLETION_MAX_ITEMS  :: 10000;
 COMPLETION_MAX_WORD   :: 128;
 COMPLETION_SLICE_MS   :: 3.0;
+COMPLETION_WAITING_SLICE_MS :: 12.0;
 COMPLETION_TIME_CHECK_BYTES :: 64 * 1024;
+COMPLETION_TYPO_MIN_NEEDLE  :: 4;
+COMPLETION_SCORE_AT_FRONT   :: 2;
+COMPLETION_SCORE_SAME_CASE  :: 1;
+COMPLETION_BEST_SCORE       :: COMPLETION_SCORE_AT_FRONT + COMPLETION_SCORE_SAME_CASE;
 
 Completion_Tier :: enum u8 {
     file;
@@ -96,37 +103,42 @@ completion_match :: (word: string, needle: string) -> matched: bool, score: s32 
     if !needle return true, 0;
     if needle.count == 1 && to_lower(word[0]) != to_lower(needle[0]) return false, 0;
 
-    MATCH_CONSECUTIVE :: 5;
-    MATCH_LEADING     :: -4;
-    MATCH_GAP         :: -1;
-    MATCH_BOUNDARY    :: 3;
+    for start: 0 .. word.count - 1 {
+        if to_lower(word[start]) != to_lower(needle[0]) continue;
 
-    next := 0;
-    last_match := -1;
-    score: s32;
-    same_case := true;
-    for 0 .. word.count - 1 {
-        if next >= needle.count break;
-        if to_lower(word[it]) != to_lower(needle[next]) continue;
-        if word[it] != needle[next] then same_case = false;
+        if start > 0 && !completion_is_word_start(word[start - 1], word[start]) continue;
 
-        at_boundary := it > 0 && (word[it - 1] == #char "_" || (is_lower(word[it - 1]) && is_upper(word[it])));
-        if next == 0 {
-            score += cast(s32) it * MATCH_LEADING;
-            if at_boundary then score += MATCH_BOUNDARY;
-        } else if it == last_match + 1 {
-            score += MATCH_CONSECUTIVE;
-        } else {
-            score += cast(s32) (it - last_match - 1) * MATCH_GAP;
-            if at_boundary then score += MATCH_BOUNDARY;
+        if completion_matches_at(advance(word, start), needle) {
+            score: s32;
+            if start == 0 then score += COMPLETION_SCORE_AT_FRONT;
+            if word[start] == needle[0] then score += COMPLETION_SCORE_SAME_CASE;
+            return true, score;
         }
-
-        last_match = it;
-        next += 1;
     }
-    if next < needle.count return false, 0;
 
-    return true, ifx same_case then score + 1 else score;
+    return false, 0;
+}
+
+completion_matches_at :: (word: string, needle: string) -> bool {
+    same := 0;
+    while same < word.count && same < needle.count && to_lower(word[same]) == to_lower(needle[same]) same += 1;
+    if same == needle.count return true;
+    if !completion.allow_typo return false;
+
+    // One typo at the first difference.
+    w := advance(word, same);
+    n := advance(needle, same);
+
+    extra := begins_with_nocase(w, advance(n));
+    if !w return extra;
+
+    skipped := begins_with_nocase(advance(w), n);
+    wrong   := begins_with_nocase(advance(w), advance(n));
+    swapped := w.count >= 2 && n.count >= 2
+               && to_lower(w[0]) == to_lower(n[1]) && to_lower(w[1]) == to_lower(n[0])
+               && begins_with_nocase(advance(w, 2), advance(n, 2));
+
+    return extra || skipped || wrong || swapped;
 }
 
 completion_clear_items :: () {
@@ -148,8 +160,13 @@ completion_is_word_char :: inline (byte: u8) -> bool {
     return byte >= 0x80 || ascii_is_alnum(byte);
 }
 
+completion_is_word_start :: inline (prev: u8, byte: u8) -> bool {
+    return !completion_is_word_char(prev) || prev == #char "_" || (is_lower(prev) && is_upper(byte));
+}
+
 completion_slice_expired :: inline (slice_start: Apollo_Time) -> bool {
-    return to_float64_seconds(current_time_monotonic() - slice_start) * 1000 >= COMPLETION_SLICE_MS;
+    budget_ms := ifx completion.pending_steps then COMPLETION_WAITING_SLICE_MS else COMPLETION_SLICE_MS;
+    return to_float64_seconds(current_time_monotonic() - slice_start) * 1000 >= budget_ms;
 }
 
 completion_key_is_indent :: (event: Input.Event) -> bool {
@@ -186,13 +203,20 @@ completion_step :: (step: s32) {
 completion_apply_pending_steps :: () {
     using completion;
 
-    completion_sort_new_items();
+    if order.count != items.count then completion_sort_new_items();
 
     row := selected_row;
     direction: s32 = 1;
     if pending_steps < 0 then direction = -1;
     while pending_steps {
         next := row + direction;
+
+        // Only a best match in this file is final. Anything else could lose to a file that hasn't been scanned yet.
+        if pass != .done && next >= 0 && next < order.count {
+            item := *items[order[next]];
+            if item.score < COMPLETION_BEST_SCORE || item.tier != .file break;
+        }
+
         if next < -1 || next >= order.count {
             if pass != .done break;
             next = ifx direction > 0 then -1 else cast(s32) order.count - 1;
@@ -310,6 +334,8 @@ completion_open :: () -> handled: bool {
     last_byte_count = buffer.bytes.count;
     selected_row = -1;
     pending_steps = 0;
+    allow_typo = false;
+    needle_exists = false;
 
     completion_clear_items();
 
@@ -376,11 +402,19 @@ completion_finish_scan :: () {
     using completion;
     pass = .done;
 
-    _, buffer := get_active_editor_and_buffer();
-    if !buffer || buffer.lang != .Jai return;
+    editor, buffer := get_active_editor_and_buffer();
+    if buffer.lang == .Jai {
+        keywords := jai_completion_keywords();
+        for keywords  completion_add_language_words(it);
+    }
 
-    keywords := jai_completion_keywords();
-    for keywords  completion_add_language_words(it);
+    // A later file can mark a known word as declared, so the order isn't final until now.
+    completion_sort_new_items();
+
+    if !items.count && !needle_exists && !allow_typo && needle.count >= COMPLETION_TYPO_MIN_NEEDLE {
+        allow_typo = true;
+        completion_start_scan(editor, buffer);
+    }
 }
 
 completion_add_language_words :: (words: [] string) {
@@ -394,24 +428,34 @@ completion_scan_buffer :: (buffer: *Buffer, tier: Completion_Tier, current_edito
     using completion;
 
     bytes := buffer.bytes.data;
-    count := buffer.bytes.count;
+    count: s64 = buffer.bytes.count;
     is_jai := buffer.lang == .Jai;
     is_c_family := buffer.lang == .C || buffer.lang == .Cpp;
     skip_text_words := !include_text_words && buffer.tokens.count == count;
+
+    first := needle[0] | 0x20;
 
     i := start_offset;
     next_time_check := i + COMPLETION_TIME_CHECK_BYTES;
 
     while i < count {
-        if !current_editor && i >= next_time_check {
-            if completion_slice_expired(slice_start) return i;
+        if i >= next_time_check {
+            if !current_editor && completion_slice_expired(slice_start) return i;
             next_time_check = i + COMPLETION_TIME_CHECK_BYTES;
         }
 
-        while i < count && !completion_is_word_char(bytes[i]) i += 1;
-        if i >= count break;
+        // A match has the needle's first letter at a word start, so jump between those.
+        stop := min(count, next_time_check);
+        while i < stop && (bytes[i] | 0x20) != first i += 1;
+        if i >= stop continue;
+
+        if !completion_is_word_char(bytes[i]) || (i > 0 && !completion_is_word_start(bytes[i - 1], bytes[i])) {
+            i += 1;
+            continue;
+        }
 
         word_start := i;
+        while word_start > 0 && completion_is_word_char(bytes[word_start - 1]) word_start -= 1;
         while i < count && completion_is_word_char(bytes[i]) i += 1;
 
         length := i - word_start;
@@ -467,7 +511,10 @@ completion_token_is_text :: (type: Token_Type) -> bool {
 
 completion_add_word :: (word: string, tier: Completion_Tier, distance: s32, score: s32, declared: bool) {
     using completion;
-    if word == needle return;
+    if word == needle {
+        needle_exists = true;
+        return;
+    }
 
     index := table_find_pointer(*seen, word);
     if index {
@@ -490,15 +537,13 @@ completion_add_word :: (word: string, tier: Completion_Tier, distance: s32, scor
 completion_sort_new_items :: () {
     using completion;
     first_new := order.count;
-    if first_new == items.count return;
-
     for first_new .. items.count - 1  array_add(*order, cast(s32) it);
 
     compare :: (a: s32, b: s32) -> s64 {
         left  := *completion.items[a];
         right := *completion.items[b];
-        if left.tier != right.tier         return cast(s64) left.tier - cast(s64) right.tier;
         if left.score != right.score       return cast(s64) right.score - cast(s64) left.score;
+        if left.tier != right.tier         return cast(s64) left.tier - cast(s64) right.tier;
         if left.distance != right.distance return cast(s64) left.distance - cast(s64) right.distance;
         if left.declared != right.declared return ifx left.declared then -1 else 1;
         if left.word.count != right.word.count return left.word.count - right.word.count;

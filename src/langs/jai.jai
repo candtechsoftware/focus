@@ -160,7 +160,7 @@ tokenize_jai_for_indentation :: (buffer: *Buffer) -> [] Indentation_Token /* tem
                 case .directive;
                     // In this version of the indentation tokenizer we don't detect .multiline_string and instead
                     // mark the whole multiline string as .directive_string
-                    if src.directive == .directive_string then token.type = .maybe_multiline;
+                    token.type = ifx src.directive == .directive_string then .maybe_multiline else .unimportant;
 
                 case .multiline_comment;    token.type = .maybe_multiline;
                 case .multiline_string;     token.type = .maybe_multiline;

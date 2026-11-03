@@ -740,6 +740,89 @@ offset_is_within_multiline_token :: (tokens: [] Indentation_Token, offset: s32) 
     return token.type == .maybe_multiline && (token.start + token.len) >= offset;
 }
 
+// Walks forward through the indentation tokens keeping a stack of the brackets left open, so that lookups at
+// increasing offsets (e.g. autoindenting line after line) cost a single pass over the tokens.
+Bracket_Scan :: struct {
+    tokens: [] Indentation_Token;
+    next_token: s64;
+    open: [..] Open_Bracket;  // in temp storage
+    line: s32 = -1;           // the line of the last bracket seen
+    statement_line: s32;      // the line the code on `line` starts on, as far as the scan has got
+
+    Open_Bracket :: struct { token: Indentation_Token; statement_line: s32; }
+}
+
+// statement_line: the line the code at `offset` starts on - its own line, or the opening line of a bracket closed on it.
+// align_to:       the offset of the text following the innermost unclosed ( or [, or -1 if there's no such bracket or it ends its line.
+// Offsets passed to the same scan must not decrease.
+get_statement_line_and_alignment :: (scan: *Bracket_Scan, buffer: Buffer, offset: s32) -> statement_line: s32, align_to: s32 {
+    while scan.next_token < scan.tokens.count {
+        token := scan.tokens[scan.next_token];
+        if token.start >= offset break;
+        scan.next_token += 1;
+        if token.type != .open && token.type != .close continue;
+
+        line := offset_to_real_line(buffer, token.start);
+        if line != scan.line { scan.line = line; scan.statement_line = line; }
+
+        if token.type == .open {
+            array_add(*scan.open, .{ token, scan.statement_line },, temp);
+        } else if scan.open {
+            closed := pop(*scan.open);
+            scan.statement_line = min(scan.statement_line, closed.statement_line);  // in `b) {` the statement starts where `(` is
+        }
+    }
+
+    line := offset_to_real_line(buffer, offset);
+    statement_line := ifx scan.line == line then scan.statement_line else line;
+
+    if !scan.open || peek(scan.open).token.kind == .brace return statement_line, -1;
+
+    innermost  := peek(scan.open).token;
+    line_end   := get_real_line_end_offset(buffer, offset_to_real_line(buffer, innermost.start));
+    text_start := innermost.start + innermost.len + count_whitespace(buffer.bytes, innermost.start + innermost.len, line_end);
+    has_text   := text_start < line_end && !(buffer.bytes[text_start] == #char "\\" && text_start + 1 == line_end);  // a C macro's trailing `\` doesn't count
+    if !has_text || text_start >= offset return statement_line, -1;
+
+    return statement_line, text_start;
+}
+
+// `indent` is the indentation of `align_to`'s line. The text between that indentation and `align_to` is blanked out,
+// keeping tabs, so the result lines up visually with `align_to`.
+get_alignment_whitespace :: (buffer: Buffer, indent: string, align_to: s32) -> string /* temp */ {
+    pos := get_real_line_start_offset(buffer, offset_to_real_line(buffer, align_to));
+    pos += count_whitespace(buffer.bytes, pos, align_to);
+
+    result := talloc_string(indent.count + align_to - pos);
+    memcpy(result.data, indent.data, indent.count);
+    result.count = indent.count;
+
+    while pos < align_to {
+        result.data[result.count] = ifx buffer.bytes[pos] == #char "\t" then cast(u8) #char "\t" else cast(u8) #char " ";
+        result.count += 1;
+        pos = next_char_offset(buffer.bytes, pos);
+    }
+
+    return result;
+}
+
+get_real_line_indent :: (buffer: Buffer, line: s32) -> string {
+    start := get_real_line_start_offset(buffer, line);
+    return get_range_as_string(buffer, .{ start, start + count_whitespace(buffer.bytes, start, get_real_line_end_offset(buffer, line)) });
+}
+
+// The whitespace to start a new line with when breaking the line at `offset`
+get_indent_for_new_line :: (scan: *Bracket_Scan, buffer: Buffer, offset: s32) -> string /* temp */ {
+    line_start := get_real_line_start_offset(buffer, offset_to_real_line(buffer, offset));
+    indent_end := line_start + count_whitespace(buffer.bytes, line_start, offset);
+    if indent_end == offset return copy_temporary_string(get_range_as_string(buffer, .{ line_start, offset }));  // breaking within the indentation leaves the rest of the line as is
+
+    statement_line, align_to := get_statement_line_and_alignment(scan, buffer, offset);
+    if align_to < 0 return copy_temporary_string(get_real_line_indent(buffer, statement_line));
+
+    return get_alignment_whitespace(buffer, get_real_line_indent(buffer, offset_to_real_line(buffer, align_to)), align_to);
+}
+
 save_buffer_to_file :: (buffer: *Buffer, file_path: string) {
     // Two scenarios here:
     // 1. We're saving a new buffer to a file (in this case has_file=false)
