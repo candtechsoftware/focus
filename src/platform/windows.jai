@@ -6,8 +6,24 @@ platform_setup :: () {
 }
 
 platform_data_dir :: () -> string {
-    dir := trim_right(path_strip_filename(get_path_of_running_executable()), "/");
-    return copy_string(dir);
+    // Portable mode: a global.focus-config next to the executable keeps everything there.
+    exe_dir := trim_right(path_strip_filename(get_path_of_running_executable()), "/");
+    if file_exists(tprint("%/global.focus-config", exe_dir)) return copy_string(exe_dir);
+
+    // Otherwise use %APPDATA%/focus-editor, so the executable can live anywhere (e.g. a bin folder).
+    path_utf16: *u16;
+    ret := SHGetKnownFolderPath(*FOLDERID_RoamingAppData, KF_FLAG_CREATE, null, *path_utf16);
+    defer CoTaskMemFree(path_utf16);
+    if !SUCCEEDED(ret) return copy_string(exe_dir);
+
+    appdata := wide_to_utf8(path_utf16,, allocator = temp);
+    path_overwrite_separators(appdata, #char "/");
+    dir := sprint("%/focus-editor", trim_right(appdata, "/"));
+    #if DEBUG {
+        dir = sprint("%/debug", dir);
+    }
+    make_directory_if_it_does_not_exist(dir, recursive = true);
+    return dir;
 }
 
 platform_config_dir :: inline () -> string {
@@ -317,6 +333,7 @@ ole32    :: #system_library "ole32";
 
 KF_FLAG_CREATE :: 0x00008000;                                       // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/ne-shlobj_core-known_folder_flag
 FOLDERID_Fonts :: #run uid("FD228CB7-AE11-4AE3-864C-16F3910AB8FE"); // https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
+FOLDERID_RoamingAppData :: #run uid("3EB685DB-65F9-4CF6-A03A-E3EF65729F3D");
 
 WaitMessage :: () -> s32 #foreign user32;
 PostMessageW :: (hWnd: HWND, Msg: u32, wParam: WPARAM, lParam: LPARAM) -> BOOL #foreign user32;
