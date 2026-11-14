@@ -1,11 +1,10 @@
 [26]  # Version number. Do not delete.
 
-# Palette: ~/gits/coder/4coder-non-source/themes/theme-handmade-hero.4coder
-# Includes Fleury semantic colors for functions, types, macros and punctuation.
+# Palette: ~/.config/nvim/colors/handmade.lua
 
 [colors]
 
-background0:                            0C0C0CFF
+background0:                            000000FF
 background1:                            1F1F27FF
 background2:                            1A1A1EFF
 background3:                            1F1F27FF
@@ -23,33 +22,33 @@ cursor_inactive:                        404040FF
 paste_animation:                        FFBB00FF
 splitter:                               1A1A1EFF
 splitter_hover:                         2A2A30FF
-letter_highlight:                       70971EFF
+letter_highlight:                       CB9401FF
 list_cursor_lite:                       1A1E22FF
 list_cursor:                            202A34FF
 shadow_dark:                            1010107F
 shadow_transparent:                     10101000
 text_input_label:                       686868FF
-char_under_cursor:                      0C0C0CFF
+char_under_cursor:                      000000FF
 
 ui_default:                             A08563FF
 ui_dim:                                 686868FF
 ui_neutral:                             494949FF
-ui_warning:                             FFAD34FF # todo
+ui_warning:                             FFBB00FF
 ui_warning_dim:                         986032FF # todo
 ui_error:                               772222FF # todo
 ui_error_bright:                        FF0000FF # todo
 ui_success:                             227722FF # todo
 
-region_scope_export:                    0C0C0CFF
-region_scope_file:                      0C0C0CFF
-region_scope_module:                    0C0C0CFF
+region_scope_export:                    000000FF
+region_scope_file:                      12100DFF
+region_scope_module:                    181410FF
 region_header:                          1F1F27FF
 region_success:                         227722FF # todo
 region_warning:                         986032FF # todo
 region_error:                           772222FF # todo
-region_heredoc:                         0C0C0CFF
+region_heredoc:                         000000FF
 
-build_panel_background:                 0C0C0CFF
+build_panel_background:                 000000FF
 build_panel_scrollbar:                  CDAA7D19
 build_panel_scrollbar_hover:            CDAA7D4C
 build_panel_scrollbar_background:       CDAA7D11
@@ -72,7 +71,7 @@ code_multiline_string:                  6B8E23FF
 code_raw_string:                        6B8E23FF
 code_char_literal:                      6B8E23FF
 code_identifier:                        A08563FF
-code_note:                              00FF00FF
+code_note:                              00A000FF
 code_number:                            6B8E23FF
 code_multiline_comment:                 686868FF
 code_modifier:                          AC7B0BFF

@@ -27,7 +27,7 @@ focus_themes="$HOME/Library/Application Support/dev.focus-editor/themes"
 focus_backup="$focus_themes/backups/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$focus_themes"
 cp fonts/liberation-mono.ttf "${focus_themes:h}/liberation-mono.ttf"
-for focus_theme in handmade-hero jblowtorch jblow-nostalgia; do
+for focus_theme in handmade-hero naysayer jblowtorch jblow-nostalgia; do
   focus_target="$focus_themes/$focus_theme.focus-theme"
   if [[ -f "$focus_target" ]] && ! cmp -s "config/themes/$focus_theme.focus-theme" "$focus_target"; then
     mkdir -p "$focus_backup"
